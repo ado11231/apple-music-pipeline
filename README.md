@@ -16,15 +16,22 @@ No drag-and-drop, no manual import.
 
 ## Setup
 
-**1. Install the tools** (needs [Homebrew](https://brew.sh)):
+### Install
+
+**Homebrew** (recommended) — installs `addsong` and pulls in `yt-dlp` and
+`ffmpeg` automatically:
 
 ```bash
-brew install yt-dlp ffmpeg
+brew install YOURNAME/tap/addsong
 ```
 
-**2. Install the command** onto your `PATH`:
+<!-- Replace YOURNAME with your GitHub username once the tap is published.
+     See RELEASE.md for the publish steps. -->
+
+**Manual** — if you'd rather not use the tap:
 
 ```bash
+brew install yt-dlp ffmpeg          # dependencies
 mkdir -p ~/bin
 mv addsong ~/bin/addsong
 chmod +x ~/bin/addsong
@@ -36,7 +43,9 @@ If `~/bin` isn't already on your `PATH`, add it (then open a new terminal):
 echo 'export PATH="$HOME/bin:$PATH"' >> ~/.zshrc
 ```
 
-**3. Confirm the watch folder works.** Apple Music auto-imports anything dropped into:
+### Confirm the watch folder works
+
+Apple Music auto-imports anything dropped into:
 
 ```
 ~/Music/Music/Media.localized/Automatically Add to Music.localized/
