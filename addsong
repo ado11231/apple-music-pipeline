@@ -21,6 +21,8 @@ set -euo pipefail
 # Config (all overridable via environment)
 # ---------------------------------------------------------------------------
 
+VERSION="1.0.0"
+
 WATCH_DIR_DEFAULT="$HOME/Music/Music/Media.localized/Automatically Add to Music.localized"
 WATCH_DIR="${ADDSONG_WATCH_DIR:-$WATCH_DIR_DEFAULT}"
 AUDIO_FORMAT="${ADDSONG_AUDIO_FORMAT:-m4a}"
@@ -63,6 +65,7 @@ OPTIONS:
     --edit            Always prompt to review metadata (even for playlists).
     --force           Import even if this track was imported before.
     -h, --help        Show this help.
+    --version         Print the version and exit.
 
 ARGUMENTS:
     <url>    A YouTube (or other yt-dlp-supported) URL.
@@ -254,6 +257,7 @@ URL=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)   usage; exit 0 ;;
+    --version)   printf '%s %s\n' "$PROG" "$VERSION"; exit 0 ;;
     --playlist)  PLAYLIST=1 ;;
     -y|--yes)    ASSUME_YES=1 ;;
     --edit)      EDIT_FORCE=1 ;;
