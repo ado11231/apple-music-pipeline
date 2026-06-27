@@ -133,6 +133,45 @@ them before import:
 Press **Enter** to accept, **e** to edit (blank keeps the current value), or **s**
 to skip.
 
+### Subscriptions
+
+Pick a YouTube playlist once, then keep your library in sync as new tracks land:
+
+```bash
+# remember a playlist once
+addsong subscribe "https://www.youtube.com/playlist?list=PL..."
+
+# show what you're subscribed to
+addsong list
+
+# import any new tracks from every subscribed playlist
+addsong sync
+```
+
+`sync` expands each subscribed playlist and imports only the tracks you haven't
+imported before (re-using the same dedup ledger, so it's safe to re-run daily).
+Flags compose with it just like a manual playlist run:
+
+```bash
+addsong sync --dry-run        # preview what sync would import
+addsong sync -y               # no prompts
+addsong sync --force          # re-import tracks even if already in the ledger
+addsong sync --edit           # review each new track
+```
+
+Forget a playlist:
+
+```bash
+addsong unsubscribe "https://www.youtube.com/playlist?list=PL..."
+```
+
+The subscription file is plain text (one URL per line, `#` comments allowed) so
+you can edit it by hand if you like:
+
+```
+~/.local/state/addsong/subscribed.tsv
+```
+
 ### Options
 
 | Flag           | Effect                                                       |
@@ -167,6 +206,7 @@ Configured with environment variables:
 | `ADDSONG_WATCH_DIR`    | Watch / output folder              | auto-detected per OS (see Setup)       |
 | `ADDSONG_AUDIO_FORMAT` | Output audio format                | `m4a`                                  |
 | `ADDSONG_LEDGER`       | Imported-tracks list (dedup)       | `~/.local/state/addsong/imported.tsv`  |
+| `ADDSONG_SUBSCRIPTIONS`| Subscribed-playlists file          | `~/.local/state/addsong/subscribed.tsv`|
 | `ADDSONG_RETRIES`      | Extra attempts on transient errors | `2`                                    |
 | `ADDSONG_RETRY_DELAY`  | Base backoff seconds per attempt   | `3`                                    |
 | `ADDSONG_CONFIG`       | Config file of `KEY=VALUE` defaults| `~/.config/addsong/config`             |

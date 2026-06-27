@@ -8,6 +8,8 @@
 #   addsong "rick astley never gonna give you up"           top YouTube result
 #   addsong --search 3 "80s disco mix"                      top 3 results
 #   addsong --playlist "https://www.youtube.com/playlist?list=..."
+#   addsong subscribe "https://www.youtube.com/playlist?list=..."
+#   addsong sync                                            # import new tracks from every subscription
 #
 # Pipeline (per track):
 #   1. read the scraped title/uploader (no download yet)
@@ -25,7 +27,7 @@ set -euo pipefail
 # Config (all overridable via environment)
 # ---------------------------------------------------------------------------
 
-VERSION="1.2.0"
+VERSION="1.3.0"
 
 # Load defaults from a config file of KEY=VALUE lines (parsed, not sourced, so it
 # can't run arbitrary code). Only ADDSONG_* keys are honored, and a value already
@@ -50,6 +52,10 @@ WATCH_DIR=""
 AUDIO_FORMAT="${ADDSONG_AUDIO_FORMAT:-m4a}"
 # Ledger of already-imported tracks, keyed by video id (duplicate detection).
 LEDGER="${ADDSONG_LEDGER:-$HOME/.local/state/addsong/imported.tsv}"
+# Subscribed playlists (one URL per line, # comments allowed). 'sync' expands
+# each and the ledger dedups already-imported tracks -- the subscription file
+# holds URLs only, no "last seen" marker.
+SUBSCRIPTIONS="${ADDSONG_SUBSCRIPTIONS:-$HOME/.local/state/addsong/subscribed.tsv}"
 # Retry behavior for transient (network) yt-dlp failures.
 RETRIES="${ADDSONG_RETRIES:-2}"          # extra attempts after the first
 RETRY_DELAY="${ADDSONG_RETRY_DELAY:-3}"  # base backoff seconds (grows per attempt)
@@ -67,6 +73,7 @@ FORCE=0         # --force:    import even if the track is already in the ledger
 DRYRUN=0        # --dry-run:  resolve and show metadata; download/import nothing
 FROM_FILE=""    # --from F:   read URLs (one per line) from a file, or - for stdin
 SEARCH=0        # --search N: treat the arg as a free-text YouTube search (N results)
+SUBCMD=""       # the keyword verb (subscribe/unsubscribe/list/sync) when present
 
 # Tallies for the end-of-run summary
 N_ADDED=0
@@ -90,8 +97,22 @@ usage() {
 $PROG: download a song and auto-import it into Apple Music.
 
 USAGE:
-    $PROG [options] <url>
+    $PROG [options] <url-or-query>
+    $PROG subscribe <playlist-url>      subscribe to a playlist
+    $PROG unsubscribe <playlist-url>    drop a subscription
+    $PROG list                          show subscribed playlists
+    $PROG sync [options]                import new tracks from every subscription
     $PROG --help
+
+SUBCOMMANDS:
+    subscribe <url>    Remember a playlist URL for repeat syncs.
+    unsubscribe <url>  Forget a playlist URL.
+    list              Print the currently subscribed playlist URLs.
+    sync               Re-import any new tracks from each subscribed playlist
+                      (already-imported tracks are skipped via the ledger, so
+                      running it daily keeps your library in step with a
+                      YouTube playlist for free). Composes with --force,
+                      --dry-run, --edit, -y.
 
 OPTIONS:
     --playlist        Treat the URL as a playlist and import every track.
@@ -124,6 +145,8 @@ ENVIRONMENT:
     ADDSONG_WATCH_DIR       Override the Apple Music watch folder path.
     ADDSONG_AUDIO_FORMAT    Output audio format (default: m4a).
     ADDSONG_LEDGER          Path to the imported-tracks ledger (dedup).
+    ADDSONG_SUBSCRIPTIONS   Path to the subscribed-playlists file
+                            (default: ~/.local/state/addsong/subscribed.tsv).
     ADDSONG_RETRIES         Extra attempts on transient failures (default: 2).
     ADDSONG_RETRY_DELAY     Base backoff seconds between attempts (default: 3).
     ADDSONG_CONFIG          Config file of KEY=VALUE defaults
@@ -134,6 +157,8 @@ EXAMPLES:
     $PROG "rick astley never gonna give you up"
     $PROG --search 3 "80s disco mix"
     $PROG --playlist "https://www.youtube.com/playlist?list=PL..."
+    $PROG subscribe "https://www.youtube.com/playlist?list=PL..."
+    $PROG sync -y            # import new tracks from subscriptions, no prompts
     $PROG -y "https://youtu.be/..."
     $PROG --dry-run "https://youtu.be/..."
     $PROG --from songs.txt
@@ -229,6 +254,75 @@ ledger_has() {
 ledger_add() {
   mkdir -p "$(dirname "$LEDGER")"
   printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$(date +%FT%T)" >> "$LEDGER"
+}
+
+# --- Subscriptions ----------------------------------------------------------
+# subscribed.tsv is one URL per line (# comments allowed). 'sync' expands each
+# URL like --playlist does; the importer ledger (above) is what makes a sync
+# "only import new tracks" -- no per-URL last-seen marker is stored here.
+
+# Add a URL to the subscription list (no-op duplicate).
+subs_add() {
+  local url="$1"
+  [[ "$url" == http://* || "$url" == https://* ]] \
+    || die "subscribe needs a URL (got: '$url')"
+  mkdir -p "$(dirname "$SUBSCRIPTIONS")"
+  [[ -f "$SUBSCRIPTIONS" ]] || : > "$SUBSCRIPTIONS"
+  if grep -qxF -- "$url" "$SUBSCRIPTIONS" 2>/dev/null; then
+    status "Already subscribed:" "$url"
+    return 0
+  fi
+  printf '%s\n' "$url" >> "$SUBSCRIPTIONS"
+  status "Subscribed:" "$url"
+}
+
+# Remove a URL from the subscription list (idempotent whether or not present).
+subs_remove() {
+  local url="$1"
+  [[ -f "$SUBSCRIPTIONS" ]] || { status "Not subscribed:" "$url"; return 0; }
+  local tmp
+  tmp="$(mktemp)"
+  # Drop exact-match lines; keep everything else (incl. comments).
+  grep -vxF -- "$url" "$SUBSCRIPTIONS" > "$tmp" 2>/dev/null || true
+  mv -f "$tmp" "$SUBSCRIPTIONS"
+  status "Unsubscribed:" "$url"
+}
+
+# Print one subscribed URL per line (comments/blanks skipped), or a hint.
+subs_list() {
+  if [[ ! -s "$SUBSCRIPTIONS" ]]; then
+    printf 'No subscriptions yet. Try: %s subscribe "https://www.youtube.com/playlist?list=..."\n' "$PROG"
+    return 0
+  fi
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    printf '%s\n' "$line"
+  done < "$SUBSCRIPTIONS"
+}
+
+# Iterate every subscribed playlist URL, expand it, and import only tracks not
+# already in the ledger (the ledger is the dedup source of truth). Composes
+# with --dry-run / --force / --edit / -y like a normal playlist run.
+subs_sync() {
+  [[ -s "$SUBSCRIPTIONS" ]] \
+    || { err "no subscriptions yet -- see '$PROG list'"; exit 1; }
+
+  local url ids rev
+  rev="$(interactive_for 1)"
+  while IFS= read -r url; do
+    [[ -z "$url" || "$url" == \#* ]] && continue
+    printf '\nSyncing: %s\n' "$url"
+    ids="$(yt-dlp --flat-playlist --print '%(id)s' -- "$url" 2>/dev/null)" \
+      || { err "could not read playlist: $url"; N_FAILED=$((N_FAILED+1)); continue; }
+    if [[ -z "$ids" ]]; then
+      err "no tracks found in playlist: $url"
+      N_FAILED=$((N_FAILED+1))
+      continue
+    fi
+    run_url_stream "$rev" \
+      <<< "$(printf '%s\n' "$ids" | sed '/^$/d; s#^#https://www.youtube.com/watch?v=#')"
+  done < "$SUBSCRIPTIONS"
+  finish_batch
 }
 
 # Run yt-dlp with bounded retry. Stdout goes to file $1, stderr to file $2,
@@ -497,6 +591,19 @@ finish_batch() {
 main() {
   local URL="" tool ids rev rc
 
+  # Subcommand peek: a bare first arg of subscribe/unsubscribe/list/sync isn't
+  # a URL or a YouTube search (URLs always start with http(s)://), so intercept
+  # it as the verb rather than routing it into the search/URL path below.
+  case "${1:-}" in
+    subscribe|unsubscribe|list|sync)
+      SUBCMD="$1"; shift
+      # If this is the very first thing and the help/version flags alone were
+      # requested, honour them immediately.
+      [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && { usage; exit 0; }
+      [[ "${1:-}" == "--version" ]] && { printf '%s %s\n' "$PROG" "$VERSION"; exit 0; }
+      ;;
+  esac
+
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -h|--help)   usage; exit 0 ;;
@@ -518,23 +625,46 @@ main() {
     shift
   done
 
+  # Acknowledge subcommands before the URL/search validation below, because
+  # list/sync don't take a <url> argument at all and would otherwise trip the
+  # "expected a URL" guard.
+  if [[ -n "$SUBCMD" ]]; then
+    case "$SUBCMD" in
+      subscribe)   [[ -n "$URL" ]] || die "subscribe needs a URL"; subs_add    "$URL"; exit 0 ;;
+      unsubscribe) [[ -n "$URL" ]] || die "unsubscribe needs a URL"; subs_remove "$URL"; exit 0 ;;
+      list)        subs_list; exit 0 ;;
+      # sync needs preflight (yt-dlp + watch dir); but short-circuit if there
+      # are no subscriptions so the user doesn't have to install yt-dlp just
+      # to see the friendly "none yet" message.
+      sync)
+        if [[ ! -s "$SUBSCRIPTIONS" ]]; then
+          err "no subscriptions yet -- see '$PROG list'"
+          exit 1
+        fi
+        ;;
+    esac
+  fi
+
   # Decide input mode. --from (file), --playlist (URL), --search (free text),
-  # or a single URL. They are mutually exclusive.
-  if [[ -n "$FROM_FILE" ]]; then
-    { [[ "$PLAYLIST" -eq 1 ]] || [[ "$SEARCH" -gt 0 ]]; } && die "--from is exclusive with --playlist/--search"
-    [[ -n "$URL" ]] && die "--from is exclusive with a URL/search argument"
-  elif [[ "$PLAYLIST" -eq 1 ]]; then
-    [[ "$SEARCH" -gt 0 ]] && die "--playlist is exclusive with --search"
-    [[ -z "$URL" ]] && die "--playlist needs a URL"
-    [[ "$URL" != http://* && "$URL" != https://* ]] && die "--playlist needs a URL (got: '$URL')"
-  elif [[ "$SEARCH" -gt 0 ]]; then
-    [[ -z "$URL" ]] && die "--search needs a query (try: $PROG --search 3 \"rick astley never gonna give you up\")"
-    [[ "$URL" == http://* || "$URL" == https://* ]] && die "--search and a URL are mutually exclusive"
-  elif [[ -z "$URL" ]]; then
-    usage >&2; exit 1
-  elif [[ "$URL" != http://* && "$URL" != https://* ]]; then
-    # Default: a bare non-URL argument is a 1-result YouTube search.
-    SEARCH=1
+  # or a single URL. They are mutually exclusive. Only the sync subcommand can
+  # legitimately have no URL at all here, so skip the guards in that case.
+  if [[ -z "$SUBCMD" ]]; then
+    if [[ -n "$FROM_FILE" ]]; then
+      { [[ "$PLAYLIST" -eq 1 ]] || [[ "$SEARCH" -gt 0 ]]; } && die "--from is exclusive with --playlist/--search"
+      [[ -n "$URL" ]] && die "--from is exclusive with a URL/search argument"
+    elif [[ "$PLAYLIST" -eq 1 ]]; then
+      [[ "$SEARCH" -gt 0 ]] && die "--playlist is exclusive with --search"
+      [[ -z "$URL" ]] && die "--playlist needs a URL"
+      [[ "$URL" != http://* && "$URL" != https://* ]] && die "--playlist needs a URL (got: '$URL')"
+    elif [[ "$SEARCH" -gt 0 ]]; then
+      [[ -z "$URL" ]] && die "--search needs a query (try: $PROG --search 3 \"rick astley never gonna give you up\")"
+      [[ "$URL" == http://* || "$URL" == https://* ]] && die "--search and a URL are mutually exclusive"
+    elif [[ -z "$URL" ]]; then
+      usage >&2; exit 1
+    elif [[ "$URL" != http://* && "$URL" != https://* ]]; then
+      # Default: a bare non-URL argument is a 1-result YouTube search.
+      SEARCH=1
+    fi
   fi
 
   # Resolve platform + watch folder. ADDSONG_WATCH_DIR always wins.
@@ -586,6 +716,9 @@ See SETUP.md." ;;
 
   have_tty=0
   [[ -e /dev/tty && -r /dev/tty ]] && have_tty=1
+
+  # 'sync' was peeked earlier but needs preflight, so it falls through to here.
+  [[ "$SUBCMD" == "sync" ]] && subs_sync
 
   if [[ -n "$FROM_FILE" ]]; then
     rev="$(interactive_for 1)"   # batch: non-interactive unless --edit

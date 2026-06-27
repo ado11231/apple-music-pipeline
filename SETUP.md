@@ -136,14 +136,15 @@ addsong --version
 
 All settings are environment variables (see `addsong --help`):
 
-| Variable               | Purpose                       | Default                                |
-|------------------------|-------------------------------|----------------------------------------|
-| `ADDSONG_WATCH_DIR`    | Watch / output folder         | auto-detected per OS (see Step 2)      |
-| `ADDSONG_AUDIO_FORMAT` | Output audio format           | `m4a`                                  |
-| `ADDSONG_LEDGER`       | Imported-tracks list (dedup)  | `~/.local/state/addsong/imported.tsv`  |
-| `ADDSONG_RETRIES`      | Extra attempts on transient   | `2`                                    |
-| `ADDSONG_RETRY_DELAY`  | Base backoff seconds           | `3`                                    |
-| `ADDSONG_CONFIG`       | Config file of `KEY=VALUE`    | `~/.config/addsong/config`             |
+| Variable                 | Purpose                       | Default                                |
+|--------------------------|-------------------------------|----------------------------------------|
+| `ADDSONG_WATCH_DIR`      | Watch / output folder         | auto-detected per OS (see Step 2)      |
+| `ADDSONG_AUDIO_FORMAT`   | Output audio format           | `m4a`                                  |
+| `ADDSONG_LEDGER`         | Imported-tracks list (dedup)  | `~/.local/state/addsong/imported.tsv`  |
+| `ADDSONG_SUBSCRIPTIONS`  | Subscribed-playlists file     | `~/.local/state/addsong/subscribed.tsv` |
+| `ADDSONG_RETRIES`        | Extra attempts on transient   | `2`                                    |
+| `ADDSONG_RETRY_DELAY`    | Base backoff seconds           | `3`                                    |
+| `ADDSONG_CONFIG`         | Config file of `KEY=VALUE`    | `~/.config/addsong/config`             |
 
 Put `KEY=VALUE` lines in `~/.config/addsong/config` to set defaults once (it's
 parsed, not executed — only `ADDSONG_*` keys are read). A real environment

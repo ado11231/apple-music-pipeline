@@ -49,6 +49,7 @@ Using the watch folder instead of AppleScript or the Music API means:
 | `clean_meta()`        | Normalize a metadata string (strip junk, collapse spaces). |
 | `safe_name()`         | Make a string safe to use as a filename.                   |
 | `ledger_has()` / `ledger_add()` | Duplicate detection by video id.           |
+| `subs_add()`/`subs_remove()`/`subs_list()`/`subs_sync()` | Subscribed-playlist management + sync. |
 | `review_meta()`       | Interactive accept/edit/skip prompt (reads `/dev/tty`).    |
 | `process_one()`       | Runs the full pipeline for one URL.                        |
 
@@ -61,7 +62,12 @@ exits non-zero if any track failed.
 ## State and side effects
 
 - **Ledger:** append-only TSV at `ADDSONG_LEDGER`
-  (`~/.local/state/addsong/imported.tsv`), one row per imported track.
+  (`~/.local/state/addsong/imported.tsv`), one row per imported track. The
+  ledger is also the source of truth for `sync`'s "only new tracks" behavior --
+  there's no per-subscription last-seen marker.
+- **Subscriptions:** plain-text list of playlist URLs at `ADDSONG_SUBSCRIPTIONS`
+  (`~/.local/state/addsong/subscribed.tsv`), one URL per line, `#` comments
+  allowed. Edited only by `subscribe`/`unsubscribe`; read by `list`/`sync`.
 - **Staging:** each download uses a `mktemp -d` directory that is removed
   whether the track succeeds or fails.
 - **Output:** exactly one tagged audio file moved into `ADDSONG_WATCH_DIR`.

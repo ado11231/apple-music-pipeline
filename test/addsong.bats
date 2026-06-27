@@ -266,3 +266,124 @@ teardown_stubs() {
   [ "$status" -eq 0 ]
   [ "$output" = "/tmp/fakehome/Music/addsong" ]
 }
+
+# --- Subscriptions -------------------------------------------------------
+#
+# subscribe/unsubscribe/list operate on a small TSV of subscribed playlist
+# URLs (# comments allowed, blank lines skipped). sync iterates each
+# subscribed URL like --playlist would, and the importer ledger dedups
+# already-imported tracks -- the subscription file holds only URLs.
+
+subs_setup() {
+  WATCH="$(mktemp -d)"
+  LED="$(mktemp)"
+  SUBS="$(mktemp)"
+  : > "$SUBS"
+  export ADDSONG_WATCH_DIR="$WATCH"
+  export ADDSONG_LEDGER="$LED"
+  export ADDSONG_SUBSCRIPTIONS="$SUBS"
+}
+
+subs_teardown() {
+  rm -rf "$WATCH" "$SUBS"
+  rm -f "$LED"
+}
+
+@test "subscribe appends a URL" {
+  subs_setup
+  run "$ADDSONG" subscribe "https://www.youtube.com/playlist?list=PLabc"
+  [ "$status" -eq 0 ]
+  grep -qxF 'https://www.youtube.com/playlist?list=PLabc' "$SUBS"
+  subs_teardown
+}
+
+@test "subscribe rejects a non-URL" {
+  subs_setup
+  run "$ADDSONG" subscribe "not a url"
+  [ "$status" -ne 0 ]
+  grep -q 'needs a URL' <<<"$output"
+  subs_teardown
+}
+
+@test "subscribe is idempotent (exact-line dedup)" {
+  subs_setup
+  "$ADDSONG" subscribe "https://youtu.be/PLabc" >/dev/null 2>&1
+  "$ADDSONG" subscribe "https://youtu.be/PLabc" >/dev/null 2>&1
+  [ "$(grep -cxF 'https://youtu.be/PLabc' "$SUBS")" -eq 1 ]
+  subs_teardown
+}
+
+@test "unsubscribe removes a URL" {
+  subs_setup
+  "$ADDSONG" subscribe "https://youtu.be/PLabc" >/dev/null 2>&1
+  "$ADDSONG" subscribe "https://youtu.be/PLxyz" >/dev/null 2>&1
+  run "$ADDSONG" unsubscribe "https://youtu.be/PLabc"
+  [ "$status" -eq 0 ]
+  [ "$(grep -cxF 'https://youtu.be/PLabc' "$SUBS")" -eq 0 ]
+  [ "$(grep -cxF 'https://youtu.be/PLxyz' "$SUBS")" -eq 1 ]
+  subs_teardown
+}
+
+@test "unsubscribe is idempotent when the URL isn't subscribed" {
+  subs_setup
+  run "$ADDSONG" unsubscribe "https://youtu.be/never"
+  [ "$status" -eq 0 ]
+  subs_teardown
+}
+
+@test "list skips blanks and # comments" {
+  subs_setup
+  printf '# my subscriptions\n\nhttps://youtu.be/AA\n# trailing note\nhttps://youtu.be/BB\n' > "$SUBS"
+  run "$ADDSONG" list
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^https://')" -eq 2 ]
+  subs_teardown
+}
+
+@test "list with no subscriptions prints a friendly hint" {
+  subs_setup
+  : > "$SUBS"   # exists but empty
+  run "$ADDSONG" list
+  [ "$status" -eq 0 ]
+  grep -q 'No subscriptions yet' <<<"$output"
+  subs_teardown
+}
+
+@test "sync with no subscriptions exits early (no preflight)" {
+  subs_setup
+  : > "$SUBS"
+  run "$ADDSONG" sync
+  [ "$status" -ne 0 ]
+  grep -q 'no subscriptions yet' <<<"$output"
+  # The empty-subscriptions short-circuit must not require yt-dlp/ffmpeg:
+  # grep finding no match exits 1, which is what we expect here.
+  run grep -q 'not found on PATH' <<<"$output"
+  [ "$status" -eq 1 ]
+  subs_teardown
+}
+
+@test "sync expands each subscribed playlist (dry-run with stubs)" {
+  setup_stubs
+  subs_setup
+  printf 'https://youtu.be/PLabc\nhttps://youtu.be/PLxyz\n' > "$SUBS"
+  run "$ADDSONG" sync --dry-run
+  [ "$status" -eq 0 ]
+  # One "Syncing:" header per subscribed URL, one "Would add" per stub track.
+  [ "$(printf '%s\n' "$output" | grep -c '^Syncing:')" -eq 2 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^  Would add')" -eq 2 ]
+  # The summary counts the imported (would-add) tracks across both playlists.
+  grep -q 'Would add 2' <<<"$output"
+  subs_teardown
+  teardown_stubs
+}
+
+@test "sync skips # comments and blank lines in the subscription file" {
+  setup_stubs
+  subs_setup
+  printf '# annotate\n\nhttps://youtu.be/PLabc\n# trailing\n' > "$SUBS"
+  run "$ADDSONG" sync --dry-run
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^Syncing:')" -eq 1 ]
+  subs_teardown
+  teardown_stubs
+}
