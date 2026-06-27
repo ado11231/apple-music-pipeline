@@ -21,7 +21,7 @@ dragging files around.
 Don't have a link? Just type the song's name:
 
 ```bash
-addsong "rick astley never gonna give you up"
+addsong "songname"
 ```
 
 **Note:** Songs come from YouTube (and other sites). Only download what you have
