@@ -65,6 +65,12 @@ lives elsewhere, find the path in **Music > Settings > Files** and set
 # single track
 addsong "https://www.youtube.com/watch?v=..."
 
+# by name — no URL needed (top YouTube result)
+addsong "rick astley never gonna give you up"
+
+# top 3 search results
+addsong --search 3 "80s disco mix"
+
 # a whole playlist
 addsong --playlist "https://www.youtube.com/playlist?list=..."
 
@@ -88,15 +94,16 @@ to skip.
 
 ### Options
 
-| Flag         | Effect                                                       |
-|--------------|-------------------------------------------------------------|
-| `--playlist` | Import every track in a playlist URL                         |
-| `--from FILE`| Read URLs (one per line) from `FILE`, or `-` for stdin       |
-| `-y`, `--yes`| Don't prompt; accept the scraped/cleaned metadata           |
-| `--edit`     | Always prompt to review (even for each track in a playlist)  |
-| `--force`    | Import even if the track was imported before                 |
-| `--dry-run`  | Resolve and show metadata; download/import nothing           |
-| `-h`,`--help`| Show help                                                   |
+| Flag           | Effect                                                       |
+|----------------|-------------------------------------------------------------|
+| `--search N`   | Treat the argument as a free-text YouTube search; import the top N (1-50) results. Default `1` when the argument is not a URL. No new dependencies. |
+| `--playlist`   | Import every track in a playlist URL                         |
+| `--from FILE`  | Read URLs (one per line) from `FILE`, or `-` for stdin       |
+| `-y`, `--yes`  | Don't prompt; accept the scraped/cleaned metadata           |
+| `--edit`       | Always prompt to review (even for each track in a playlist)  |
+| `--force`      | Import even if the track was imported before                 |
+| `--dry-run`    | Resolve and show metadata; download/import nothing           |
+| `-h`,`--help`  | Show help                                                   |
 
 Playlists and `--from` lists are non-interactive by default; add `--edit` to
 review each track. `--from` skips blank lines and `#` comments, so a saved list
@@ -141,6 +148,10 @@ ADDSONG_WATCH_DIR="/Volumes/Music/Automatically Add to Music.localized"
 - **Sources:** any site `yt-dlp` supports works, including SoundCloud — just pass
   the URL. (Apple Music's own catalog is not a source; this imports downloaded
   audio into your library.)
+- **Search-by-name** (no URL): pass a free-text query and `addsong` imports the
+  top YouTube result (or top `N` with `--search N`). YouTube's top result isn't
+  always the studio original — use `--edit` to review each hit, or `--dry-run`
+  to preview what would import before committing.
 - **Duplicates** are tracked by video ID, so re-runs skip songs already imported.
   Use `--force` to override.
 - **Syncing to your phone** is handled by Apple, not this tool. Tracks have to upload

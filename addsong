@@ -21,7 +21,7 @@ set -euo pipefail
 # Config (all overridable via environment)
 # ---------------------------------------------------------------------------
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 
 # Load defaults from a config file of KEY=VALUE lines (parsed, not sourced, so it
 # can't run arbitrary code). Only ADDSONG_* keys are honored, and a value already
@@ -60,6 +60,7 @@ EDIT_FORCE=0    # --edit:     always prompt to review (even in playlists)
 FORCE=0         # --force:    import even if the track is already in the ledger
 DRYRUN=0        # --dry-run:  resolve and show metadata; download/import nothing
 FROM_FILE=""    # --from F:   read URLs (one per line) from a file, or - for stdin
+SEARCH=0        # --search N: treat the arg as a free-text YouTube search (N results)
 
 # Tallies for the end-of-run summary
 N_ADDED=0
@@ -88,6 +89,9 @@ USAGE:
 OPTIONS:
     --playlist        Treat the URL as a playlist and import every track.
     --from FILE       Read URLs (one per line) from FILE, or - for stdin.
+    --search N        Treat the argument as a free-text YouTube search and
+                      import the top N results (1-50; default 1 when the
+                      argument is not a URL). No new dependencies.
     -y, --yes         Don't prompt; accept the scraped/cleaned metadata as-is.
     --edit            Always prompt to review metadata (even for playlists).
     --force           Import even if this track was imported before.
@@ -96,7 +100,12 @@ OPTIONS:
     --version         Print the version and exit.
 
 ARGUMENTS:
-    <url>    A YouTube (or other yt-dlp-supported) URL.
+    <url-or-query>    A YouTube (or other yt-dlp-supported) URL, or -- with
+                      --search / by default -- a free-text search query.
+                      Examples:
+                        addsong "https://www.youtube.com/watch?v=..."
+                        addsong "rick astley never gonna give you up"
+                        addsong --search 3 "80s disco mix"
 
 INTERACTIVE REVIEW:
     For a single track in a terminal, $PROG shows the scraped artist and title
@@ -115,6 +124,8 @@ ENVIRONMENT:
 
 EXAMPLES:
     $PROG "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    $PROG "rick astley never gonna give you up"
+    $PROG --search 3 "80s disco mix"
     $PROG --playlist "https://www.youtube.com/playlist?list=PL..."
     $PROG -y "https://youtu.be/..."
     $PROG --dry-run "https://youtu.be/..."
@@ -426,6 +437,10 @@ main() {
       --edit)      EDIT_FORCE=1 ;;
       --force)     FORCE=1 ;;
       --dry-run)   DRYRUN=1 ;;
+      --search)    SEARCH="${2:-}"; [[ -n "$SEARCH" ]] || die "--search needs a number (e.g. --search 3)"
+                   [[ "$SEARCH" =~ ^[1-9][0-9]*$ ]] || die "--search needs a positive integer (got: '$SEARCH')"
+                   (( SEARCH <= 50 )) || die "--search is capped at 50 (use a playlist URL for more)"
+                   shift ;;
       --from)      FROM_FILE="${2:-}"; [[ -n "$FROM_FILE" ]] || die "--from needs a file (or - for stdin)"; shift ;;
       --)          shift; URL="${1:-}"; break ;;
       -*)          die "unknown option: $1 (try --help)" ;;
@@ -434,12 +449,23 @@ main() {
     shift
   done
 
+  # Decide input mode. --from (file), --playlist (URL), --search (free text),
+  # or a single URL. They are mutually exclusive.
   if [[ -n "$FROM_FILE" ]]; then
-    :   # URLs come from the file; each is validated as it is processed
+    { [[ "$PLAYLIST" -eq 1 ]] || [[ "$SEARCH" -gt 0 ]]; } && die "--from is exclusive with --playlist/--search"
+    [[ -n "$URL" ]] && die "--from is exclusive with a URL/search argument"
+  elif [[ "$PLAYLIST" -eq 1 ]]; then
+    [[ "$SEARCH" -gt 0 ]] && die "--playlist is exclusive with --search"
+    [[ -z "$URL" ]] && die "--playlist needs a URL"
+    [[ "$URL" != http://* && "$URL" != https://* ]] && die "--playlist needs a URL (got: '$URL')"
+  elif [[ "$SEARCH" -gt 0 ]]; then
+    [[ -z "$URL" ]] && die "--search needs a query (try: $PROG --search 3 \"rick astley never gonna give you up\")"
+    [[ "$URL" == http://* || "$URL" == https://* ]] && die "--search and a URL are mutually exclusive"
   elif [[ -z "$URL" ]]; then
     usage >&2; exit 1
   elif [[ "$URL" != http://* && "$URL" != https://* ]]; then
-    die "expected a URL (got: '$URL'). Try: $PROG \"https://www.youtube.com/watch?v=...\""
+    # Default: a bare non-URL argument is a 1-result YouTube search.
+    SEARCH=1
   fi
 
   # Preflight: required tools and a writable watch folder.
@@ -475,6 +501,16 @@ See SETUP.md (Step 2)."
     ids="$(yt-dlp --flat-playlist --print '%(id)s' -- "$URL" 2>/dev/null)" \
       || die "could not read playlist: $URL"
     [[ -n "$ids" ]] || die "no tracks found in playlist: $URL"
+
+    rev="$(interactive_for 1)"
+    run_url_stream "$rev" \
+      <<< "$(printf '%s\n' "$ids" | sed '/^$/d; s#^#https://www.youtube.com/watch?v=#')"
+    finish_batch
+  elif [[ "$SEARCH" -gt 0 ]]; then
+    printf 'Searching YouTube for: %s\n' "$URL"
+    ids="$(yt-dlp --flat-playlist --print '%(id)s' -- "ytsearch${SEARCH}:${URL}" 2>/dev/null)" \
+      || die "search failed: $URL"
+    [[ -n "$ids" ]] || die "no search results for: $URL"
 
     rev="$(interactive_for 1)"
     run_url_stream "$rev" \
