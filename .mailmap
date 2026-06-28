@@ -1,0 +1,9 @@
+# Re-attribute Claude co-author trailers in legacy commits to the project owner.
+# GitHub uses this when rendering the Contributors sidebar and commit co-author chips.
+# See: https://git-scm.com/docs/gitmailmap
+
+adnan <165864864+ado11231@users.noreply.github.com> Claude <noreply@anthropic.com>
+adnan <165864864+ado11231@users.noreply.github.com> Claude Sonnet 4.6 <noreply@anthropic.com>
+adnan <165864864+ado11231@users.noreply.github.com> Claude Opus 4.8 <noreply@anthropic.com>
+adnan <165864864+ado11231@users.noreply.github.com> <noreply@anthropic.com>
+ado11231 <adoalagic0@gmail.com> adnan <165864864+ado11231@users.noreply.github.com>
