@@ -11,7 +11,7 @@
 </p>
 
 ```bash
-addsong "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+addsong "https://www.youtube.com/watch?v=..."
 ```
 
 That one command grabs the song, adds the **title, artist, and cover art**, and
@@ -29,14 +29,29 @@ the right to.
 
 ### Install
 
-**On a Mac — the easy way.** One command installs `addsong` and everything it
-needs:
+One command for your OS installs `addsong` **and** the two free tools it needs
+(`yt-dlp` and `ffmpeg`). Then open a new terminal and run `addsong --version`.
+
+**macOS** (Homebrew):
 
 ```bash
 brew install ado11231/tap/addsong
 ```
 
-**Windows or Linux** (or a Mac without Homebrew) — three quick steps.
+**Linux / WSL** (paste into a terminal):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ado11231/apple-music-pipeline/main/install.sh | bash
+```
+
+**Windows** (paste into **PowerShell**):
+
+```powershell
+irm https://raw.githubusercontent.com/ado11231/apple-music-pipeline/main/install.ps1 | iex
+```
+
+<details>
+<summary>Prefer to install by hand? (or no installer for your setup)</summary>
 
 **1. Download `addsong`.** Use the green **Code** button near the top of this
 page → **Download ZIP**, then unzip it.
@@ -56,31 +71,27 @@ sudo pacman -S yt-dlp ffmpeg        # Arch
 mkdir -p ~/bin && mv addsong ~/bin/ && chmod +x ~/bin/addsong
 ```
 
-Open a new terminal and check it works:
-
-```bash
-addsong --version
-```
-
 **Got `command not found`?** Run this once, reopen your terminal, and try again:
 
 ```bash
 echo 'export PATH="$HOME/bin:$PATH"' >> ~/.bashrc   # use ~/.zshrc on a Mac
 ```
 
+</details>
+
 ### Add Your First Song
 
 Type any song's name — no link needed:
 
 ```bash
-addsong "your favourite song"
+addsong "songname"
 ```
 
 `addsong` finds it and shows what it got, so you can catch any mistakes:
 
 ```
-  Artist   Rick Astley
-  Title    Never Gonna Give You Up
+  Artist   Artist Name
+  Title    Song Title
 
   [Enter] add    [e] edit    [s] skip
 ```
@@ -217,7 +228,7 @@ two checks that CI does:
 
 ```bash
 brew install shellcheck bats-core   # one-time
-shellcheck addsong                  # lint the script
+shellcheck addsong install.sh       # lint the scripts
 bats test/                          # run the tests
 ```
 

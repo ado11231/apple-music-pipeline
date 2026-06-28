@@ -77,6 +77,14 @@ brew test addsong
 3. Recompute the sha256 (step 2) and update `url` + `sha256` in the tap's
    `Formula/addsong.rb`, then push the tap.
 
+## The Linux / Windows Installers
+
+`install.sh` (Linux/WSL) and `install.ps1` (Windows) download `addsong` straight
+from the **`main`** branch, so a normal `git push` to `main` is all it takes for
+new users to get the latest script — no tag or checksum step like the Homebrew
+tap needs. To pin an installer to a specific ref instead, users can set
+`ADDSONG_REF` (e.g. `ADDSONG_REF=v1.3.0`) before running it.
+
 ## Adding More Tools To The Same Tap
 
 Drop another `Formula/<tool>.rb` into the same `homebrew-tap` repo. Users get it
