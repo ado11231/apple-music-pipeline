@@ -50,6 +50,14 @@ fi
 # (if set) always wins.
 WATCH_DIR=""
 AUDIO_FORMAT="${ADDSONG_AUDIO_FORMAT:-m4a}"
+# yt-dlp VBR quality for the extracted audio: 0 (best) .. 10 (worst). Overridable
+# per run with --quality; the env var sets the default.
+AUDIO_QUALITY="${ADDSONG_AUDIO_QUALITY:-0}"
+# Audio formats accepted by --format. Limited to formats whose yt-dlp
+# --audio-format name equals the output file extension, since the importer
+# looks the staged file up as "<id>.<format>" (e.g. vorbis->.ogg, alac->.m4a,
+# best->varies would break that, so they're intentionally excluded).
+AUDIO_FORMATS='m4a mp3 flac opus wav aac'
 # Ledger of already-imported tracks, keyed by video id (duplicate detection).
 LEDGER="${ADDSONG_LEDGER:-$HOME/.local/state/addsong/imported.tsv}"
 # Subscribed playlists (one URL per line, # comments allowed). 'sync' expands
@@ -77,6 +85,8 @@ SUBCMD=""       # the keyword verb (subscribe/unsubscribe/list/sync/clear-ledger
 QUIET=0         # --quiet:   suppress non-error info banners and status lines
 VERBOSE=0       # --verbose: surface yt-dlp/ffmpeg stderr
 NO_COLOR_FLAG=0 # --no-color: explicitly disable colored output
+NOTIFY=0        # --notify:  fire a desktop notification per added track + batch
+case "${ADDSONG_NOTIFY:-}" in 1|true|yes|on) NOTIFY=1 ;; esac
 
 # Paint yt-dlp's real percent/speed/ETA bar for the download step. On by
 # default; needs a TTY (falls back to the indeterminate spinner without one,
@@ -135,6 +145,31 @@ status() {
   # When colored, `icon` carries the glyph + a space (and is empty otherwise),
   # so the no-color output is byte-for-byte the same aligned line as before.
   printf '  %s%s%-8s%s %s\n' "$kcolor" "$icon" "$keyword" "$C_RESET" "$rest"
+}
+
+# Fire a desktop notification (best effort). No-op unless --notify /
+# ADDSONG_NOTIFY is set, and silently does nothing when no notifier is
+# installed (terminal-notifier/osascript on macOS, notify-send elsewhere).
+#   $1 = title, $2 = body
+notify() {
+  [[ "$NOTIFY" -eq 1 ]] || return 0
+  local title="$1" body="$2"
+  case "${OS_MODE:-}" in
+    mac)
+      if command -v terminal-notifier >/dev/null 2>&1; then
+        terminal-notifier -title "$title" -message "$body" >/dev/null 2>&1 || true
+      elif command -v osascript >/dev/null 2>&1; then
+        local t="${title//\"/\\\"}" b="${body//\"/\\\"}"   # escape quotes for AppleScript
+        osascript -e "display notification \"$b\" with title \"$t\"" >/dev/null 2>&1 || true
+      fi
+      ;;
+    *)
+      # Linux / WSL / Windows / other: notify-send if it exists.
+      command -v notify-send >/dev/null 2>&1 \
+        && notify-send "$title" "$body" >/dev/null 2>&1 || true
+      ;;
+  esac
+  return 0
 }
 
 # Decide whether to colorize. Honors --no-color, NO_COLOR env, and non-TTY.
@@ -211,7 +246,14 @@ OPTIONS:
     --no-progress     Use the indeterminate spinner instead of yt-dlp's real
                       download bar (the bar is on by default at a TTY; also
                       via ADDSONG_PROGRESS=0).
+    --format FMT      Output audio format: m4a, mp3, flac, opus, wav, aac
+                      (default: m4a; overrides ADDSONG_AUDIO_FORMAT).
+    --quality N       Audio quality 0-10, 0=best (default: 0; overrides
+                      ADDSONG_AUDIO_QUALITY).
     --no-color        Disable colored output (also honors NO_COLOR).
+    --notify          Fire a desktop notification as each track is imported
+                      (also via ADDSONG_NOTIFY=1). No-op if no notifier is
+                      installed (terminal-notifier/osascript, notify-send).
     -h, --help        Show this help.
     --version         Print the version and exit.
 
@@ -231,7 +273,8 @@ INTERACTIVE REVIEW:
 
 ENVIRONMENT:
     ADDSONG_WATCH_DIR       Override the Apple Music watch folder path.
-    ADDSONG_AUDIO_FORMAT    Output audio format (default: m4a).
+    ADDSONG_AUDIO_FORMAT    Output audio format (default: m4a); see --format.
+    ADDSONG_AUDIO_QUALITY   Audio quality 0-10, 0=best (default: 0); see --quality.
     ADDSONG_LEDGER          Path to the imported-tracks ledger (dedup).
     ADDSONG_SUBSCRIPTIONS   Path to the subscribed-playlists file
                             (default: ~/.local/state/addsong/subscribed.tsv).
@@ -239,6 +282,8 @@ ENVIRONMENT:
     ADDSONG_RETRY_DELAY     Base backoff seconds between attempts (default: 3).
     ADDSONG_PROGRESS        Set to 0 to disable the real download bar and use
                             the spinner (same as --no-progress).
+    ADDSONG_NOTIFY          Set to 1 to fire a desktop notification per imported
+                            track (same as --notify).
     ADDSONG_CONFIG          Config file of KEY=VALUE defaults
                             (default: ~/.config/addsong/config).
 
@@ -451,11 +496,14 @@ run_ytdlp() {
   local out="$1" errf="$2"; shift 2
   local attempt=0 rc
   while :; do
-    if yt-dlp "$@" >"$out" 2>"$errf"; then
+    # Capture yt-dlp's own exit status. (`rc=$?` after an `if` would read the
+    # if-statement's status -- 0 when the condition is false -- not yt-dlp's.)
+    rc=0
+    yt-dlp "$@" >"$out" 2>"$errf" || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
       [[ "$VERBOSE" -eq 1 && -s "$errf" ]] && cat "$errf" >&2
       return 0
     fi
-    rc=$?
     [[ "$VERBOSE" -eq 1 && -s "$errf" ]] && cat "$errf" >&2
     if grep -qiE "$YTDLP_HARD_ERRORS" "$errf"; then return "$rc"; fi
     attempt=$((attempt + 1))
@@ -715,7 +763,7 @@ process_one() {
 
   local -a dlargs=(
     --no-playlist --retries 3 --fragment-retries 3 --socket-timeout 30
-    --extract-audio --audio-format "$AUDIO_FORMAT" --audio-quality 0
+    --extract-audio --audio-format "$AUDIO_FORMAT" --audio-quality "$AUDIO_QUALITY"
     --embed-thumbnail --convert-thumbnails jpg
     -o "$staging/%(id)s.%(ext)s"
     -- "$url"
@@ -725,13 +773,15 @@ process_one() {
     # --newline makes yt-dlp emit one progress line per update on stdout; route
     # that stdout into render_progress through a process substitution. The fd is
     # opened once here and survives run_ytdlp's retries (each attempt just dups
-    # it), so the wrapper's retry + stderr-capture path is untouched.
-    local pfd ppid
-    exec {pfd}> >(render_progress "Downloading: $artist - $title")
+    # it), so the wrapper's retry + stderr-capture path is untouched. A fixed fd
+    # (9) is used rather than the `{var}>` auto-fd form, which needs bash 4.1+
+    # (macOS still ships bash 3.2).
+    local ppid
+    exec 9> >(render_progress "Downloading: $artist - $title")
     ppid=$!
-    run_ytdlp "/dev/fd/$pfd" "$staging/dl.err" --progress --newline "${dlargs[@]}" \
+    run_ytdlp "/dev/fd/9" "$staging/dl.err" --progress --newline "${dlargs[@]}" \
       && dl_rc=0 || dl_rc=$?
-    exec {pfd}>&-                         # close write end so the bar drains/clears
+    exec 9>&-                             # close write end so the bar drains/clears
     wait "$ppid" 2>/dev/null || true
   else
     with_spinner "Downloading: $artist - $title" \
@@ -793,6 +843,7 @@ process_one() {
 
   ledger_add "$id" "$artist" "$title"
   status "Added" "$artist - $title"
+  notify "Added to Apple Music" "$artist - $title"
   return 0
 }
 
@@ -890,7 +941,16 @@ main() {
       --quiet)     QUIET=1 ;;
       --verbose)   VERBOSE=1 ;;
       --no-color)  NO_COLOR_FLAG=1 ;;
+      --notify)    NOTIFY=1 ;;
       --no-progress) PROGRESS=0 ;;
+      --format)    AUDIO_FORMAT="${2:-}"; [[ -n "$AUDIO_FORMAT" ]] || die "--format needs a value (e.g. --format mp3)"
+                   [[ " $AUDIO_FORMATS " == *" $AUDIO_FORMAT "* ]] \
+                     || die "--format must be one of: $AUDIO_FORMATS (got: '$AUDIO_FORMAT')"
+                   shift ;;
+      --quality)   AUDIO_QUALITY="${2:-}"; [[ -n "$AUDIO_QUALITY" ]] || die "--quality needs a number 0-10 (0=best)"
+                   { [[ "$AUDIO_QUALITY" =~ ^[0-9]+$ ]] && (( AUDIO_QUALITY <= 10 )); } \
+                     || die "--quality must be an integer 0-10 (got: '$AUDIO_QUALITY')"
+                   shift ;;
       --search)    SEARCH="${2:-}"; [[ -n "$SEARCH" ]] || die "--search needs a number (e.g. --search 3)"
                    [[ "$SEARCH" =~ ^[1-9][0-9]*$ ]] || die "--search needs a positive integer (got: '$SEARCH')"
                    (( SEARCH <= 50 )) || die "--search is capped at 50 (use a playlist URL for more)"

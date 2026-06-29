@@ -108,6 +108,14 @@ setup_stubs() {
   STUBBIN="$(mktemp -d)"
   WATCH="$(mktemp -d)"
   mkdir -p "$STUBBIN"
+  # Fake yt-dlp covering all three calls the script makes:
+  #   --flat-playlist  -> canned ids (search/playlist expansion)
+  #   --extract-audio  -> writes a staged audio file next to the -o template
+  #   otherwise        -> prints the 8 per-track metadata lines
+  # Env toggles let the failure tests force a specific step to error:
+  #   STUB_META_FAIL=1  fail the metadata read
+  #   STUB_DL_FAIL=1    fail the download/extract step
+  #   STUB_META=...     override the canned metadata block
   cat > "$STUBBIN/yt-dlp" <<'STUB'
 #!/usr/bin/env bash
 for a in "$@"; do
@@ -121,10 +129,40 @@ for a in "$@"; do
     exit 0
   fi
 done
-printf 'VID000\nTest Title\nTest Uploader\nNA\nNA\nNA\nNA\nNA\n'
+extract=0; out=""; fmt="m4a"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --extract-audio) extract=1 ;;
+    --audio-format)  fmt="$2"; shift ;;
+    -o)              out="$2"; shift ;;
+  esac
+  shift
+done
+if [[ "$extract" -eq 1 ]]; then
+  [[ "${STUB_DL_FAIL:-0}" == 1 ]] && { echo 'ERROR: unable to download video data' >&2; exit 1; }
+  printf 'audio' > "$(dirname "$out")/VID000.$fmt"
+  exit 0
+fi
+[[ "${STUB_META_FAIL:-0}" == 1 ]] && { echo 'ERROR: Private video' >&2; exit 1; }
+# A benign stderr warning: run_ytdlp captures it to the err file and only
+# surfaces it under --verbose (used by the verbosity tests).
+echo 'WARNING: addsong-stub-warning' >&2
+printf '%s\n' "${STUB_META:-VID000
+Test Title
+Test Uploader
+NA
+NA
+NA
+NA
+NA}"
 STUB
+  # Fake ffmpeg: write the (tagged) output file it is asked to produce so the
+  # script's "no output / empty file" guards pass. STUB_FF_FAIL=1 forces an error.
   cat > "$STUBBIN/ffmpeg" <<'STUB'
 #!/usr/bin/env bash
+[[ "${STUB_FF_FAIL:-0}" == 1 ]] && { echo 'ERROR: tagging failed' >&2; exit 1; }
+out="${@: -1}"
+printf 'tagged' > "$out"
 exit 0
 STUB
   chmod +x "$STUBBIN/yt-dlp" "$STUBBIN/ffmpeg"
@@ -194,6 +232,224 @@ teardown_stubs() {
   run "$ADDSONG" --playlist --search 2 "https://youtube.com/playlist?list=x"
   [ "$status" -ne 0 ]
   grep -q 'exclusive' <<<"$output"
+}
+
+# --- process_one() pipeline ----------------------------------------------
+#
+# Exercise the full per-track pipeline against the fake yt-dlp/ffmpeg from
+# setup_stubs, asserting all three return codes. process_one is called
+# directly (sourced) so we observe its raw 0/2/1 rather than main()'s mapped
+# exit status. WATCH_DIR is normally filled in by main(), so we set it here.
+
+# Source the script and run process_one with the stubs on PATH, capturing its
+# real return code. $1 = extra shell to run before the call (env toggles etc).
+run_process_one() {
+  # PATH (with the stubs) is already exported by setup_stubs and inherited here.
+  # No retries/backoff so the failure case doesn't sleep.
+  run bash -c "
+    export ADDSONG_RETRIES=0 ADDSONG_RETRY_DELAY=0
+    $1
+    source '$ADDSONG'
+    WATCH_DIR='$WATCH'
+    process_one 'https://www.youtube.com/watch?v=z' 0 && r=0 || r=\$?
+    echo \"RC=\$r\""
+}
+
+@test "process_one: added -> returns 0, file in watch dir, ledger row written" {
+  setup_stubs
+  run_process_one ""
+  grep -q 'RC=0' <<<"$output"
+  grep -q '^  Added' <<<"$output"
+  [ -s "$WATCH/Test Uploader - Test Title.m4a" ]
+  grep -q '^VID000	' "$ADDSONG_LEDGER"
+  teardown_stubs
+}
+
+@test "process_one: skipped -> duplicate in ledger returns 2, no file imported" {
+  setup_stubs
+  printf 'VID000\tTest Uploader\tTest Title\t2024-01-01T00:00:00\n' > "$ADDSONG_LEDGER"
+  run_process_one ""
+  grep -q 'RC=2' <<<"$output"
+  grep -q 'already imported' <<<"$output"
+  [ -z "$(ls -A "$WATCH")" ]
+  teardown_stubs
+}
+
+@test "process_one: failed -> download error returns 1, nothing imported" {
+  setup_stubs
+  run_process_one "export STUB_DL_FAIL=1"
+  grep -q 'RC=1' <<<"$output"
+  grep -q 'download failed' <<<"$output"
+  [ -z "$(ls -A "$WATCH")" ]
+  [ ! -s "$ADDSONG_LEDGER" ]
+  teardown_stubs
+}
+
+@test "process_one: failed -> metadata read error returns 1" {
+  setup_stubs
+  run_process_one "export STUB_META_FAIL=1"
+  grep -q 'RC=1' <<<"$output"
+  grep -q 'could not read info' <<<"$output"
+  teardown_stubs
+}
+
+# --- --format / --quality flags ------------------------------------------
+
+@test "--format rejects an unsupported value" {
+  run "$ADDSONG" --format ogg "x"
+  [ "$status" -ne 0 ]
+  grep -q 'must be one of' <<<"$output"
+}
+
+@test "--quality rejects a value above 10" {
+  run "$ADDSONG" --quality 11 "x"
+  [ "$status" -ne 0 ]
+  grep -q '0-10' <<<"$output"
+}
+
+@test "--quality rejects a non-integer" {
+  run "$ADDSONG" --quality high "x"
+  [ "$status" -ne 0 ]
+  grep -q '0-10' <<<"$output"
+}
+
+@test "--format mp3 produces an .mp3 in the watch dir" {
+  setup_stubs
+  run "$ADDSONG" -y --no-progress --format mp3 "https://www.youtube.com/watch?v=z"
+  [ "$status" -eq 0 ]
+  [ -s "$WATCH/Test Uploader - Test Title.mp3" ]
+  teardown_stubs
+}
+
+# --- --notify ------------------------------------------------------------
+
+@test "--notify invokes a notifier for an added track" {
+  setup_stubs
+  # Stub every notifier so this passes regardless of the runner's OS_MODE
+  # (notify-send on Linux/Windows/WSL; terminal-notifier/osascript on macOS).
+  for n in notify-send terminal-notifier osascript; do
+    cat > "$STUBBIN/$n" <<STUB
+#!/usr/bin/env bash
+printf 'NOTIFIED %s\n' "\$*" >> "$WATCH/.notify"
+STUB
+    chmod +x "$STUBBIN/$n"
+  done
+  run "$ADDSONG" -y --no-progress --notify "https://www.youtube.com/watch?v=z"
+  [ "$status" -eq 0 ]
+  [ -f "$WATCH/.notify" ]
+  grep -q 'Test Uploader - Test Title' "$WATCH/.notify"
+  teardown_stubs
+}
+
+@test "without --notify no notifier is invoked" {
+  setup_stubs
+  cat > "$STUBBIN/notify-send" <<STUB
+#!/usr/bin/env bash
+printf 'NOTIFIED\n' >> "$WATCH/.notify"
+STUB
+  chmod +x "$STUBBIN/notify-send"
+  run "$ADDSONG" -y --no-progress "https://www.youtube.com/watch?v=z"
+  [ "$status" -eq 0 ]
+  [ ! -f "$WATCH/.notify" ]
+  teardown_stubs
+}
+
+# --- --quiet / --verbose / non-TTY spinner -------------------------------
+
+@test "--quiet suppresses status lines" {
+  setup_stubs
+  run "$ADDSONG" --quiet -y --no-progress --dry-run "https://www.youtube.com/watch?v=z"
+  [ "$status" -eq 0 ]
+  ! grep -q 'Would add' <<<"$output"
+  teardown_stubs
+}
+
+@test "--quiet still prints errors" {
+  setup_stubs
+  export STUB_META_FAIL=1
+  run "$ADDSONG" --quiet -y --no-progress "https://www.youtube.com/watch?v=z"
+  [ "$status" -ne 0 ]
+  grep -q 'could not read info' <<<"$output"
+  teardown_stubs
+}
+
+@test "--verbose surfaces yt-dlp stderr" {
+  setup_stubs
+  run "$ADDSONG" --verbose -y --dry-run "https://www.youtube.com/watch?v=z"
+  [ "$status" -eq 0 ]
+  grep -q 'addsong-stub-warning' <<<"$output"
+  teardown_stubs
+}
+
+@test "without --verbose yt-dlp stderr stays hidden" {
+  setup_stubs
+  run "$ADDSONG" -y --dry-run "https://www.youtube.com/watch?v=z"
+  [ "$status" -eq 0 ]
+  ! grep -q 'addsong-stub-warning' <<<"$output"
+  teardown_stubs
+}
+
+@test "with_spinner runs synchronously and propagates exit when there's no TTY" {
+  # have_tty=0 forces the no-TTY branch: the command runs synchronously (its
+  # output is not swallowed), its exit status is returned, and no spinner frame
+  # or label is written (the spinner only ever paints to /dev/tty).
+  run bash -c "source '$ADDSONG'; have_tty=0; with_spinner 'SpinLabel' bash -c 'echo HELLO; exit 7' && r=0 || r=\$?; echo \"rc=\$r\""
+  grep -q 'HELLO' <<<"$output"
+  grep -q 'rc=7' <<<"$output"
+  ! grep -q 'SpinLabel' <<<"$output"
+  ! grep -q '⠋' <<<"$output"
+}
+
+# --- run_ytdlp() retry / backoff / hard-error classification -------------
+#
+# run_ytdlp retries transient failures (linear backoff) and bails at once on a
+# permanent failure matching YTDLP_HARD_ERRORS. A counter file records how many
+# times the fake yt-dlp was invoked. Retries/backoff are set tiny so it's fast.
+
+# Write a fake yt-dlp whose body is $2 into dir $1, with a call counter at $1/n.
+make_ytdlp() {
+  printf '0' > "$1/n"
+  cat > "$1/yt-dlp" <<STUB
+#!/usr/bin/env bash
+n=\$(( \$(cat "$1/n") + 1 )); printf '%s' "\$n" > "$1/n"
+$2
+STUB
+  chmod +x "$1/yt-dlp"
+}
+
+# Source the script (low retries/no backoff) and run run_ytdlp with the stub.
+run_run_ytdlp() {
+  run bash -c "
+    export PATH=\"$1:\$PATH\" ADDSONG_RETRIES=2 ADDSONG_RETRY_DELAY=0
+    source '$ADDSONG'
+    run_ytdlp '$1/out' '$1/err' --print x -- url && echo RYRC=0 || echo RYRC=\$?"
+}
+
+@test "run_ytdlp: succeeds on the first try (no retry)" {
+  bin="$(mktemp -d)"
+  make_ytdlp "$bin" 'exit 0'
+  run_run_ytdlp "$bin"
+  grep -q 'RYRC=0' <<<"$output"
+  [ "$(cat "$bin/n")" -eq 1 ]
+  rm -rf "$bin"
+}
+
+@test "run_ytdlp: transient failure then success (retries)" {
+  bin="$(mktemp -d)"
+  make_ytdlp "$bin" '[[ "$n" -eq 1 ]] && { echo "ERROR: unable to download (timed out)" >&2; exit 1; }; exit 0'
+  run_run_ytdlp "$bin"
+  grep -q 'RYRC=0' <<<"$output"
+  [ "$(cat "$bin/n")" -eq 2 ]   # one failed attempt + one success
+  rm -rf "$bin"
+}
+
+@test "run_ytdlp: hard error is not retried" {
+  bin="$(mktemp -d)"
+  make_ytdlp "$bin" 'echo "ERROR: Private video. Sign in if you have access." >&2; exit 1'
+  run_run_ytdlp "$bin"
+  grep -q 'RYRC=1' <<<"$output"
+  [ "$(cat "$bin/n")" -eq 1 ]   # bailed immediately, no retry
+  rm -rf "$bin"
 }
 
 # --- detect_os -----------------------------------------------------------

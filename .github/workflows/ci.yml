@@ -7,12 +7,21 @@ on:
 
 jobs:
   lint-and-test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install shellcheck and bats
+      - name: Install shellcheck and bats (Linux)
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y shellcheck bats
+
+      - name: Install shellcheck and bats (macOS)
+        if: runner.os == 'macOS'
+        run: brew install shellcheck bats-core
 
       - name: Lint with shellcheck
         run: shellcheck addsong install.sh

@@ -23,6 +23,8 @@ class Addsong < Formula
 
   def install
     bin.install "addsong"
+    bash_completion.install "completions/addsong.bash" => "addsong"
+    zsh_completion.install "completions/_addsong"
   end
 
   test do

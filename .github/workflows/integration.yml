@@ -1,0 +1,44 @@
+name: Integration smoke test
+
+# Opt-in only: this runs the real yt-dlp + ffmpeg against a Creative Commons /
+# public-domain track end to end, to catch breakage from upstream yt-dlp
+# changes. It is intentionally NOT part of the default PR/push CI (network
+# access makes it flaky), so trigger it manually from the Actions tab.
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "A Creative Commons / public-domain track URL to import"
+        required: false
+        # Big Buck Bunny (Blender Foundation, CC-BY) -- long-lived and freely
+        # licensed. Override here if it ever goes away.
+        default: "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install yt-dlp and ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python3 -m pip install --upgrade yt-dlp
+          yt-dlp --version
+          ffmpeg -version | head -n1
+
+      - name: Import one track end to end
+        env:
+          # Linux output-only mode: addsong writes the tagged file here instead
+          # of an Apple Music watch folder.
+          ADDSONG_WATCH_DIR: ${{ runner.temp }}/out
+          URL: ${{ github.event.inputs.url }}
+        run: |
+          mkdir -p "$ADDSONG_WATCH_DIR"
+          ./addsong -y --no-progress --no-color "$URL"
+          echo "--- output folder ---"
+          ls -l "$ADDSONG_WATCH_DIR"
+          # Fail the job if nothing was produced.
+          count=$(find "$ADDSONG_WATCH_DIR" -type f -name '*.m4a' | wc -l)
+          test "$count" -ge 1
