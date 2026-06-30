@@ -12,8 +12,8 @@
 # (RELEASE.md shows how).
 class Addsong < Formula
   desc "Download a song from a URL and auto-import it into Apple Music"
-  homepage "https://github.com/ado11231/apple-music-pipeline"
-  url "https://github.com/ado11231/apple-music-pipeline/archive/refs/tags/v1.4.0.tar.gz"
+  homepage "https://github.com/ado11231/addsong"
+  url "https://github.com/ado11231/addsong/archive/refs/tags/v1.0.0.tar.gz"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
   license "MIT"
 

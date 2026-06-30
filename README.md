@@ -26,16 +26,16 @@ brew install ado11231/tap/addsong
 ### Linux&nbsp;<img src="assets/linux.svg" height="22" align="absmiddle" style="position: relative; top: -3px;"> 
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ado11231/apple-music-pipeline/main/install.sh | bash
+curl -fsSL https://ado11231.github.io/addsong/install.sh | bash
 ```
 
 ### Windows&nbsp;<img src="assets/windows.svg" height="22" align="absmiddle" style="position: relative; top: -3px;"> 
 
-Paste into **PowerShell**, then run `addsong` from **Git Bash** or **WSL**
-afterwards, not from PowerShell:
+Paste it into **PowerShell**. When it finishes, open a new terminal and run
+`addsong` from anywhere — PowerShell, CMD, or any shell:
 
 ```powershell
-irm https://raw.githubusercontent.com/ado11231/apple-music-pipeline/main/install.ps1 | iex
+irm https://ado11231.github.io/addsong/install.ps1 | iex
 ```
 
 Check version to see if installation worked.

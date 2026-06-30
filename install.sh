@@ -4,7 +4,7 @@
 # ffmpeg -- then drops the addsong script on your PATH.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/ado11231/apple-music-pipeline/main/install.sh | bash
+#   curl -fsSL https://ado11231.github.io/addsong/install.sh | bash
 #
 # macOS users should prefer:  brew install ado11231/tap/addsong
 #
@@ -12,9 +12,15 @@
 # ADDSONG_REF (defaults to main) and the install dir with ADDSONG_BIN_DIR.
 set -euo pipefail
 
-REPO="ado11231/apple-music-pipeline"
+REPO="ado11231/addsong"
 REF="${ADDSONG_REF:-main}"
-RAW_URL="https://raw.githubusercontent.com/$REPO/$REF/addsong"
+# The default install pulls the script from GitHub Pages; pinning ADDSONG_REF to
+# a tag/branch falls back to the raw URL so you can install a specific version.
+if [[ "$REF" == "main" ]]; then
+  RAW_URL="https://ado11231.github.io/addsong/addsong"
+else
+  RAW_URL="https://raw.githubusercontent.com/$REPO/$REF/addsong"
+fi
 
 # --- messaging (TTY + NO_COLOR aware, like addsong itself) -----------------
 C_INFO=""; C_OK=""; C_WARN=""; C_ERR=""; C_RESET=""

@@ -8,7 +8,7 @@
   so you can call `addsong "..."` from PowerShell or CMD like any other tool.
 
 .EXAMPLE
-  irm https://raw.githubusercontent.com/ado11231/apple-music-pipeline/main/install.ps1 | iex
+  irm https://ado11231.github.io/addsong/install.ps1 | iex
 
 .NOTES
   Override the download ref with $env:ADDSONG_REF (defaults to main).
@@ -16,9 +16,15 @@
 
 $ErrorActionPreference = 'Stop'
 
-$Repo   = 'ado11231/apple-music-pipeline'
+$Repo   = 'ado11231/addsong'
 $Ref    = if ($env:ADDSONG_REF) { $env:ADDSONG_REF } else { 'main' }
-$RawUrl = "https://raw.githubusercontent.com/$Repo/$Ref/addsong"
+# The default install pulls the script from GitHub Pages; pinning ADDSONG_REF to
+# a tag/branch falls back to the raw URL so you can install a specific version.
+$RawUrl = if ($Ref -eq 'main') {
+  'https://ado11231.github.io/addsong/addsong'
+} else {
+  "https://raw.githubusercontent.com/$Repo/$Ref/addsong"
+}
 
 function Info($m) { Write-Host $m -ForegroundColor Cyan }
 function Ok($m)   { Write-Host "  $m" -ForegroundColor Green }

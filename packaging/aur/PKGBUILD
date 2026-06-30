@@ -1,0 +1,20 @@
+# Maintainer: ado <adoalagic0@gmail.com>
+pkgname=addsong
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Download a song from a URL and auto-import it into Apple Music"
+arch=('any')
+url="https://github.com/ado11231/addsong"
+license=('MIT')
+depends=('yt-dlp' 'ffmpeg')
+optdepends=('bash-completion: tab completion for bash')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('0000000000000000000000000000000000000000000000000000000000000000')
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver"
+  install -Dm755 addsong "$pkgdir/usr/bin/addsong"
+  install -Dm644 completions/addsong.bash "$pkgdir/usr/share/bash-completion/completions/addsong"
+  install -Dm644 completions/_addsong "$pkgdir/usr/share/zsh/site-functions/_addsong"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
