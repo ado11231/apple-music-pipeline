@@ -1,10 +1,14 @@
-### addsong
+<h3 align="center">addsong</h3>
 
-**Paste a link, and the song shows up in Apple Music automatically.**
+<p align="center">
+  <img src="assets/demo.gif" alt="addsong demo" width="600">
+</p>
 
-`addsong` a song name or a YouTube link. It downloads the track, adds the  
-**title, artist, and cover art**, and drops it into Apple Music. No dragging  
-files around making downloading unoffical music seemless.
+<p align="center"><b>Paste a link, and the song shows up in Apple Music automatically.</b></p>
+
+`addsong` a song name or a YouTube link. It downloads the track, adds the
+**title, artist, and cover art**, and drops it into Apple Music. No dragging
+files around making downloading unofficial music seamless.
 
 ```bash
 addsong "songname"                      
@@ -13,19 +17,19 @@ addsong "https://www.youtube.com/watch?v=..."
 
 ## Installation
 
-### macOS 
+### macOS&nbsp;<img src="assets/macos.svg" height="22" align="absmiddle" style="position: relative; top: -3px;"> 
 
 ```bash
 brew install ado11231/tap/addsong
 ```
 
-### Linux 
+### Linux&nbsp;<img src="assets/linux.svg" height="22" align="absmiddle" style="position: relative; top: -3px;"> 
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ado11231/apple-music-pipeline/main/install.sh | bash
 ```
 
-### Windows 
+### Windows&nbsp;<img src="assets/windows.svg" height="22" align="absmiddle" style="position: relative; top: -3px;"> 
 
 Paste into **PowerShell**, then run `addsong` from **Git Bash** or **WSL**
 afterwards, not from PowerShell:
